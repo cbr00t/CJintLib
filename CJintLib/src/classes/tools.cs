@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Dynamic;
 using System.Threading;
@@ -11,7 +13,12 @@ namespace CJintLib {
 			JsConsole.writeLine(ConsoleColor.Cyan, "CLBK", data);
 		}
 	}
-	public class JsConsole : CObject40 {
+
+	public class JsBase : CObject {
+		public JsEngine Engine { get; set; }
+	}
+
+	public class JsConsole : JsBase {
 		public static Stopwatch stopWatch = new Stopwatch();
 		public void log(params object[] args) => writeLine(ConsoleColor.Gray, "LOG ", args);
 		public void debug(params object[] args) => writeLine(ConsoleColor.DarkBlue, "DBG ", args);
@@ -25,7 +32,7 @@ namespace CJintLib {
 
 			if (color.HasValue)
 				Console.ForegroundColor = color.Value;
-			Console.Write($"[{stopWatch.Elapsed.ToString()}]  [{Thread.CurrentThread.ManagedThreadId}]  [{type}]  ");
+			Console.Write($"[{stopWatch.Elapsed}]  [{Thread.CurrentThread.ManagedThreadId}]  [{type}]  ");
 			if (color.HasValue)
 				Console.ResetColor();
 

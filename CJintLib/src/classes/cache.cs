@@ -9,15 +9,15 @@ namespace CJintLib {
 
 		public virtual void Dispose() =>
 			CacheTS = null;
-		public static bool Fill<T>(out T t) where T : Cache, new() {
+		public static bool Fill<T>(out T t, string rootDir = null) where T : Cache, new() {
 			var res = new T();
-			var ok = res.fill();
+			var ok = res.fill(rootDir);
 			t = ok ? res : null;
 			return ok;
 		}
-		public bool sync() =>
-			NeedsUpdate ? fill() : true;
-		public virtual bool fill() =>
+		public bool sync(string rootDir = null) =>
+			NeedsUpdate ? fill(rootDir) : true;
+		public virtual bool fill(string rootDir = null) =>
 			true;
 	}
 }

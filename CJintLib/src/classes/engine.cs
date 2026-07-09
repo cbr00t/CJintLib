@@ -7,16 +7,14 @@ using System.Windows.Forms;
 using Acornima.Ast;
 using Jint;
 using Jint.Native;
+using Jint.Runtime;
 using Jint.Runtime.Modules;
 
 using Newtonsoft.Json.Linq;
 
 namespace CJintLib {
-	public class JSEngine : CObject, IDisposable {
-		public delegate void UpdateEngineProc(JSEngine sender, Jint.Engine engine);
-
-		public const string WWWRoot = @"/appserv/www/skyerp";
-		public const string JintRoot = WWWRoot + @"/jint";
+	public class JsEngine : CObject, IDisposable {
+		public delegate void UpdateEngineProc(JsEngine sender, Jint.Engine engine);
 
 		protected Jint.Engine engine;
 		protected Jint.Options args;
@@ -44,54 +42,31 @@ namespace CJintLib {
 			set =>
 				args = value;
 		}
+		public JsConsole Con { get; set; }
+		public JsApp App { get; set; }
 		public static JSCoreLib CoreLib { get; set; } = new JSCoreLib();
 		public static JSBootCode BootLib { get; set; } = new JSBootCode();
-		public CList<JSLib> Libs { get; set; } = new CList<JSLib>();
+		public CList<JsLib> Libs { get; set; } = new CList<JsLib>();
 		public bool EventLoopRunning {
 			get => ti_eventLoop?.IsAlive ?? false;
 		}
 
-		public event UpdateEngineProc UpdateEngine;
+		public event UpdateEngineProc PreUpdateEngine, PostUpdateEngine;
 
-		public static T From<T>(IEnumerable<string> names) where T : JSEngine, new() {
+		#region Builders
+		public static T From<T>(IEnumerable<string> names) where T : JsEngine, new() {
 			var res = new T();
 			if (names.bosDegilMi())
 				res.addLibs(names);
 			return res;
 		}
-		public static T From<T>(params string[] names) where T : JSEngine, new() =>
+		public static T From<T>(params string[] names) where T : JsEngine, new() =>
 			From<T>(names as IEnumerable<string>);
-		public static JSEngine From(IEnumerable<string> names) =>
-			From<JSEngine>(names);
-		public static JSEngine From(params string[] names) =>
-			From<JSEngine>(names);
-
-		protected virtual JSEngine init() {
-			var eng = Engine = new Engine(Args);
-			updateEngine();
-
-			var boot = BootLib;
-			var core = CoreLib;
-			if (!boot.fill())
-				throw new Exception("JSEngine Boot code init failed");
-			if (!core.fill())
-				throw new Exception("JSEngine Core code init failed");
-
-			if (Libs.bosDegilMi()) {
-				foreach (var lib in Libs)
-					lib.fill();
-			}
-			eval(boot.Pre, true);
-			eng.SetValue("callback", new Action<object>(JsCallback.callback));
-			eng.SetValue("console", new JsConsole());
-			eval(core, true);
-			eng.SetValue("delay", new Func<int, Task>(ms =>
-				Task.Delay(ms)));
-			eval(boot.Post, true);
-			eval(Libs, false);
-
-			return this;
-		}
+		public static JsEngine From(IEnumerable<string> names) =>
+			From<JsEngine>(names);
+		public static JsEngine From(params string[] names) =>
+			From<JsEngine>(names);
+		#endregion
 
 		public virtual void Dispose() {
 			stopEventLoop();
@@ -107,9 +82,22 @@ namespace CJintLib {
 			engine?.Dispose();
 			engine = null;
 		}
-		protected virtual JSEngine argsDuzenle(ref Jint.Options args) {
+
+		#region Engine Init
+		protected virtual JsEngine init() {
+			Engine = new Engine(Args);
+			Con = new JsConsole { Engine = this };
+			App = new JsApp { Engine = this };
+			this.preUpdateEngine()
+				.fillLibs()
+				.preBoot()
+				.afterPostBoot()
+				.postUpdateEngine();
+			return this;
+		}
+		protected virtual JsEngine argsDuzenle(ref Jint.Options args) {
 			args
-				.EnableModules(new DefaultModuleLoader(WWWRoot))
+				.EnableModules(new DefaultModuleLoader(JsLib.JintRoot, false))
 				.Strict(true)
 				.AllowClr()
 				.AllowClrWrite(true)
@@ -124,15 +112,72 @@ namespace CJintLib {
 			args.Host.StringCompilationAllowed = true;
 			return this;
 		}
-		protected virtual JSEngine updateEngine() {
-			if (UpdateEngine != null) {
-				var t = Engine;
-				UpdateEngine(this, t);
-			}
+		protected JsEngine preUpdateEngine() =>
+			_updateEngine(PreUpdateEngine);
+		protected JsEngine postUpdateEngine() =>
+			_updateEngine(PreUpdateEngine);
+		protected JsEngine _updateEngine(UpdateEngineProc handler) {
+			handler?.Invoke(this, Engine);
 			return this;
 		}
 
-		public JsValue eval(IEnumerable<JSLib> libs, bool sync = true, int? timeout = null) {
+		#region Internals
+		protected JsEngine fillLibs() {
+			if (!BootLib.fill())
+				throw new Exception("JSEngine Boot code init failed");
+			if (!CoreLib.fill())
+				throw new Exception("JSEngine Core code init failed");
+			if (Libs.bosDegilMi()) {
+				foreach (var lib in Libs)
+					lib.fill();
+			}
+			return this;
+		}
+		protected JsEngine beforePreBoot() {
+			var eng = Engine;
+			var g = eng.Global;
+			eng
+				.SetValue("g", g)
+				.SetValue("global", g)
+				.SetValue("window", g)
+				.SetValue("self", g)
+				.SetValue("app", App)
+				.SetValue("importLibs", new JsApp.ImportLibsProc(App.importLibs));
+			return this;
+		}
+		protected JsEngine preBoot() {
+			beforePreBoot();
+			evalSync(BootLib.Pre);
+			afterPreBoot();
+			return this;
+		}
+		protected JsEngine afterPreBoot() {
+			var eng = Engine;
+			eng.SetValue("callback", new Action<object>(JsCallback.callback));
+			eng.SetValue("console", Con);
+			return this;
+		}
+		protected JsEngine postBoot() {
+			beforePostBoot();
+			evalSync(BootLib.Post);
+			return this;
+		}
+		protected JsEngine beforePostBoot() {
+			var eng = Engine;
+			eng.SetValue("delay", new Func<int, Task>(ms =>
+				Task.Delay(ms)));
+			return this;
+		}
+		protected JsEngine afterPostBoot() {
+			evalSync(CoreLib);
+			evalAsync(Libs);
+			return this;
+		}
+		#endregion
+		#endregion
+
+		#region API: Eval
+		public JsValue eval(IEnumerable<JsLib> libs, bool sync = true, int? timeout = null) {
 			if (libs.bosMu())
 				return null;
 
@@ -142,7 +187,7 @@ namespace CJintLib {
 
 			return res;
 		}
-		public JsValue eval(JSLib lib, bool sync = true, int? timeout = null) {
+		public JsValue eval(JsLib lib, bool sync = true, int? timeout = null) {
 			if (lib == null)
 				return null;
 
@@ -153,25 +198,51 @@ namespace CJintLib {
 			return res;
 		}
 		public JsValue eval(Prepared<Script> s, bool sync = false, int? timeout = null) {
-			return (
-				sync
-					? Engine.Evaluate(s)
-					: Engine.EvaluateAsync(s, CancellationToken.None)
-						.SWait(timeout)
-			);
+			try {
+				return (
+					sync
+						? Engine.Evaluate(s)
+						: Engine.EvaluateAsync(s, CancellationToken.None)
+							.SWait(timeout)
+				);
+			}
+			catch (AggregateException ex) { throw ex.InnerException ?? ex; }
+			catch (JavaScriptException ex) { throw ex.InnerException ?? ex; }
 		}
 		public JsValue eval(string s, bool sync = false, int? timeout = null) {
 			if (s.bosMu())
 				return null;
 
 			s = fixEvalCode(s);
-			return (
-				sync
-					? Engine.Evaluate(s, s)
-					: Engine.EvaluateAsync(s, s, CancellationToken.None).
-						SWait(timeout)
-			);
+			try {
+				return (
+					sync
+						? Engine.Evaluate(s, s)
+						: Engine.EvaluateAsync(s, s, CancellationToken.None).
+							SWait(timeout)
+				); 
+			}
+			catch (AggregateException ex) { throw ex.InnerException ?? ex; }
+			catch (JavaScriptException ex) { throw ex.InnerException ?? ex; }
 		}
+
+		public JsValue evalAsync(IEnumerable<JsLib> libs, int? timeout = null) =>
+			eval(libs, false, timeout);
+		public JsValue evalAsync(JsLib lib, int? timeout = null) =>
+			eval(lib, false, timeout);
+		public JsValue evalAsync(Prepared<Script> s, int? timeout = null) =>
+			eval(s, false, timeout);
+		public JsValue evalAsync(string s, int? timeout = null) =>
+			eval(s, false, timeout);
+		public JsValue evalSync(IEnumerable<JsLib> libs, int? timeout = null) =>
+
+			eval(libs, true, timeout);
+		public JsValue evalSync(JsLib lib, int? timeout = null) =>
+			eval(lib, true, timeout);
+		public JsValue evalSync(Prepared<Script> s, int? timeout = null) =>
+			eval(s, true, timeout);
+		public JsValue evalSync(string s, int? timeout = null) =>
+			eval(s, true, timeout);
 
 		public Task startEventLoop(int? timeout = null) {
 			if (!EventLoopRunning) {
@@ -200,12 +271,12 @@ namespace CJintLib {
 
 			return task_eventLoop;
 		}
-		public JSEngine stopEventLoop() {
+		public JsEngine stopEventLoop() {
 			ti_eventLoop?.abort();
 			task_eventLoop = null;
 			return this;
 		}
-		public JSEngine eventLoop(int? timeout = null) {
+		public JsEngine eventLoop(int? timeout = null) {
 			const int InternalDelayMS = 10;
 			timeout = timeout ?? Timeout.Infinite;
 			var w = timeout < 0 ? null : Stopwatch.StartNew();
@@ -218,25 +289,27 @@ namespace CJintLib {
 			}
 			return this;
 		}
-		public JSEngine processTasks() {
+		protected JsEngine processTasks() {
 			Engine?.Advanced?.ProcessTasks();
 			return this;
 		}
+		#endregion
 
-		public JSLib addLibs(IEnumerable<string> names) {
+		#region Tools
+		public JsLib addLibs(IEnumerable<string> names) {
 			if (names.bosMu())
 				return null;
 
-			var lib = JSLib.From(names);
+			var lib = JsLib.From(names);
 			if (lib == null)
 				return null;
 
 			Libs.Add(lib);
 			return lib;
 		}
-		public JSLib addLibs(params string[] names) =>
+		public JsLib addLibs(params string[] names) =>
 			addLibs((IEnumerable<string>)names);
-		public JSEngine clearLibs() {
+		public JsEngine clearLibs() {
 			Libs?.Clear();
 			return this;
 		}
@@ -248,5 +321,6 @@ namespace CJintLib {
 				s = $"(async (e = {{}}) => {{\n	{s}\n}})()";*/
 			return s;
 		}
+		#endregion
 	}
 }

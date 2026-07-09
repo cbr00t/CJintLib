@@ -18,7 +18,7 @@
     <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
-    <Optimize>true</Optimize>
+    <Optimize>false</Optimize>
     <OutputPath>..\..\..\dll\</OutputPath>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
@@ -64,6 +64,7 @@
   <ItemGroup>
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="src\classes\engine.cs" />
+    <Compile Include="src\classes\app.cs" />
     <Compile Include="src\classes\tools.cs" />
     <Compile Include="src\classes\jsLib.cs" />
     <Compile Include="src\classes\cache.cs" />
