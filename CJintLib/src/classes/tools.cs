@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Dynamic;
+using System.IO;
 using System.Threading;
 using Jint.Native;
 using Newtonsoft.Json.Linq;
@@ -30,23 +31,26 @@ namespace CJintLib {
 			if (!stopWatch.IsRunning)
 				stopWatch.Start();
 
-			if (color.HasValue)
-				Console.ForegroundColor = color.Value;
-			Console.Write($"[{stopWatch.Elapsed}]  [{Thread.CurrentThread.ManagedThreadId}]  [{type}]  ");
-			if (color.HasValue)
-				Console.ResetColor();
+			try {
+				if (color.HasValue)
+					Console.ForegroundColor = color.Value;
+				Console.Write($"[{stopWatch.Elapsed}]  [{Thread.CurrentThread.ManagedThreadId}]  [{type}]  ");
+				if (color.HasValue)
+					Console.ResetColor();
 
-			foreach (var arg in args) {
-				var v = arg;
-				if (v is JsObject jo)
-					v = jo.ToString();
-				else if (v is ExpandoObject dyn)
-					v = JToken.FromObject(v);
+				foreach (var arg in args) {
+					var v = arg;
+					if (v is JsObject jo)
+						v = jo.ToString();
+					else if (v is ExpandoObject dyn)
+						v = JToken.FromObject(v);
 
-				Console.Write(v);
-				Console.Write(' ');
+					Console.Write(v);
+					Console.Write(' ');
+				}
+				Console.WriteLine();
 			}
-			Console.WriteLine();
+			catch (IOException) { }
 		}
 	}
 }

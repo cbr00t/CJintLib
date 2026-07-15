@@ -1,12 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Acornima.Ast;
 using Jint;
 using Jint.Native;
+using Jint.Native.Object;
 using Jint.Runtime;
 using Jint.Runtime.Modules;
 
@@ -14,6 +19,7 @@ using Newtonsoft.Json.Linq;
 
 namespace CJintLib {
 	public class JsEngine : CObject, IDisposable {
+		public delegate void ArgsDuzenleProc(JsEngine sender, ref Jint.Options args);
 		public delegate void UpdateEngineProc(JsEngine sender, Jint.Engine engine);
 
 		protected Jint.Engine engine;
@@ -51,6 +57,7 @@ namespace CJintLib {
 			get => ti_eventLoop?.IsAlive ?? false;
 		}
 
+		public static event ArgsDuzenleProc ArgsDuzenleEk;
 		public event UpdateEngineProc PreUpdateEngine, PostUpdateEngine;
 
 		#region Builders
@@ -106,16 +113,40 @@ namespace CJintLib {
 				.PreferJsPrototypeMethods(true)
 				.DebugMode(false)
 				.DebuggerStatementHandling(Jint.Runtime.Debugger.DebuggerStatementHandling.Clr)
-				.InitialStepMode(Jint.Runtime.Debugger.StepMode.Into);
+				.InitialStepMode(Jint.Runtime.Debugger.StepMode.Into)
+				.TimeoutInterval(TimeSpan.FromSeconds(60));
+			var iop = args.Interop;
+			iop.Enabled = iop.AllowGetType = iop.AllowSystemReflection = true;
+			iop.CacheRecentObjectWrappers = iop.ExposeDetailedResolutionErrors = true;
+			//iop.WrapObjectHandler = new Options.WrapObjectDelegate((engine, target, type) => {
+			//	return ObjectInstance.FromObjectWithType(engine, target, type)?.AsObject();
+			//});
+			iop.ExtensionMethodTypes.AddRange(new[] {
+				typeof(MethodExtension),
+				typeof(CExt40)
+			});
+			//iop.SerializeToJson = new Options.SerializeToJsonDelegate((target, space, indent) => {
+			//	return null;
+			//});
+			iop.AllowedAssemblies.AddRange(
+				AppDomain.CurrentDomain
+					.GetAssemblies()
+					.Where(a => !a.IsDynamic)
+					.Distinct()
+			);
+
+			//iop.ClrExceptionErrorDecorator = new Options.ClrExceptionErrorDecoratorDelegate(iop)
+
 			var m = args.Modules;
 			m.RegisterRequire = true;
 			args.Host.StringCompilationAllowed = true;
+			ArgsDuzenleEk?.Invoke(this, ref args);
 			return this;
 		}
 		protected JsEngine preUpdateEngine() =>
 			_updateEngine(PreUpdateEngine);
 		protected JsEngine postUpdateEngine() =>
-			_updateEngine(PreUpdateEngine);
+			_updateEngine(PostUpdateEngine);
 		protected JsEngine _updateEngine(UpdateEngineProc handler) {
 			handler?.Invoke(this, Engine);
 			return this;
@@ -198,34 +229,27 @@ namespace CJintLib {
 			return res;
 		}
 		public JsValue eval(Prepared<Script> s, bool sync = false, int? timeout = null) {
-			try {
-				return (
-					sync
-						? Engine.Evaluate(s)
-						: Engine.EvaluateAsync(s, CancellationToken.None)
-							.SWait(timeout)
-				);
-			}
-			catch (AggregateException ex) { throw ex.InnerException ?? ex; }
-			catch (JavaScriptException ex) { throw ex.InnerException ?? ex; }
+			if (s.bosMu())
+				return null;
+
+			return withEvalErrorHandlerDo(() => (
+				sync
+					? Engine.Evaluate(s)
+					: Engine.EvaluateAsync(s, CancellationToken.None).SWait(timeout)?.UnwrapIfPromise()
+			));
 		}
 		public JsValue eval(string s, bool sync = false, int? timeout = null) {
 			if (s.bosMu())
 				return null;
 
 			s = fixEvalCode(s);
-			try {
-				return (
-					sync
-						? Engine.Evaluate(s, s)
-						: Engine.EvaluateAsync(s, s, CancellationToken.None).
-							SWait(timeout)
-				); 
-			}
-			catch (AggregateException ex) { throw ex.InnerException ?? ex; }
-			catch (JavaScriptException ex) { throw ex.InnerException ?? ex; }
-		}
+			return withEvalErrorHandlerDo(() => (
+				sync
+					? Engine.Evaluate(s, s)
+					: Engine.EvaluateAsync(s, s, CancellationToken.None).SWait(timeout)?.UnwrapIfPromise()
+			));
 
+		}
 		public JsValue evalAsync(IEnumerable<JsLib> libs, int? timeout = null) =>
 			eval(libs, false, timeout);
 		public JsValue evalAsync(JsLib lib, int? timeout = null) =>
@@ -320,6 +344,34 @@ namespace CJintLib {
 			if (!(s.StartsWith("(async") || s.StartsWith("(async function(")))
 				s = $"(async (e = {{}}) => {{\n	{s}\n}})()";*/
 			return s;
+		}
+
+		static JsValue withEvalErrorHandlerDo(Func<JsValue> proc) {
+			try {
+				return proc();
+			}
+			catch (Exception ex) when (
+				ex is AggregateException ||
+				ex is PromiseRejectedException ||
+				ex is JavaScriptException
+			) {
+				while (ex is AggregateException agg) {
+					agg = agg.Flatten();
+					if (agg.InnerExceptions.Count != 1)
+						throw;
+					ex = agg.InnerExceptions[0];
+				}
+
+				var clrEx =
+					ex is PromiseRejectedException px
+						? px.RejectedValue.ToObject() as Exception
+					: ex is JavaScriptException jx
+						? jx.Error?.ToObject() as Exception
+					: null;
+
+				ExceptionDispatchInfo.Capture(clrEx ?? ex).Throw();
+				throw;
+			}
 		}
 		#endregion
 	}

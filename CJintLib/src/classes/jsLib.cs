@@ -18,9 +18,11 @@ using Newtonsoft.Json.Linq;
 
 namespace CJintLib {
 	public class JsLib : Cache, IEnumerable<Prepared<Script>> {
+		public const string DelimList = "|";
 		public const string CF_Config = "config.php";
 
 		static string _origin, _webSrvRoot, _wwwRoot, _jintRoot;
+		static CDict<string, Prepared<Script>> key2ScriptCache;
 		protected Prepared<Script>? script;
 
 		public static string WebSrvRoot {
@@ -47,16 +49,27 @@ namespace CJintLib {
 			get => Libs.Select(n =>
 				Path.Combine(WWWRoot, $"{n}.js"));
 		}
+		public static CDict<string, Prepared<Script>> Key2ScriptCache {
+			get {
+				if (key2ScriptCache == null)
+					key2ScriptCache = new CDict<string, Prepared<Script>>();
+				return key2ScriptCache;
+			}
+		}
 		public Prepared<Script>? Script {
 			get => script;
 			set => script = value;
 		}
-		public override bool NeedsUpdate {
+		public static bool NeedsUpdate {
 			get {
-				if (base.NeedsUpdate)
+				if (CacheTS.bosMu())
 					return true;
+
+				if (DateTime.Now.Subtract(CacheTS.Value) < TimeSpan.FromSeconds(10))
+					return false;
+
 				var ts = head(CF_Config, WWWRoot);
-				return ts.bosMu() || CacheTS.bosMu() || ts > CacheTS;
+				return ts.bosMu() || ts > CacheTS;
 			}
 		}
 		public CList<string> Libs { get; set; } = new CList<string>();
@@ -99,6 +112,18 @@ namespace CJintLib {
 			if (files.bosMu())
 				return true;
 
+			invalidateCache();
+			var cacheKey = string.Join(DelimList, files);
+			var cache = Key2ScriptCache;
+			if (cache != null) {
+				lock (cache) {
+					if (cache.TryGetValue(cacheKey, out var cached)) {
+						t = cached;
+						return true;
+					}
+				}
+			}
+
 			var f2d = new CDict<string, string>();
 			Parallel.ForEach(
 				files,
@@ -137,8 +162,16 @@ namespace CJintLib {
 
 			var res = Engine.PrepareScript(code, code, true);
 			t = res;
+			if (!res.IsValid)
+				return false;
 
-			return res.IsValid;
+			CacheTS = DateTime.Now;
+			if (cache != null) {
+				lock (cache)
+					cache[cacheKey] = res;
+			}
+
+			return true;
 		}
 
 		public JsValue eval(JsEngine je, bool sync = false, int? timeout = null) =>
@@ -160,6 +193,14 @@ namespace CJintLib {
 			return this;
 		}
 
+		public static bool invalidateCache() {
+			if (!NeedsUpdate || key2ScriptCache == null)
+				return false;
+
+			lock (key2ScriptCache)
+				key2ScriptCache.Clear();
+			return true;
+		}
 		public IEnumerator<Prepared<Script>> getEnumerator() {
 			var s = Script;
 			if (s.HasValue)

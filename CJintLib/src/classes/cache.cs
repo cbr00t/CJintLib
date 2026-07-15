@@ -2,10 +2,7 @@
 
 namespace CJintLib {
 	public class Cache : CObject, IDisposable {
-		public DateTime? CacheTS { get; set; }
-		public virtual bool NeedsUpdate {
-			get { return CacheTS.bosMu(); }
-		}
+		public static DateTime? CacheTS { get; set; }
 
 		public virtual void Dispose() =>
 			CacheTS = null;
@@ -15,8 +12,6 @@ namespace CJintLib {
 			t = ok ? res : null;
 			return ok;
 		}
-		public bool sync(string rootDir = null) =>
-			NeedsUpdate ? fill(rootDir) : true;
 		public virtual bool fill(string rootDir = null) =>
 			true;
 	}
