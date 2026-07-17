@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,15 +14,19 @@ using Jint;
 using Jint.Native;
 using Jint.Native.Object;
 using Jint.Runtime;
+using Jint.Runtime.Interop;
 using Jint.Runtime.Modules;
 
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Serialization;
 
 namespace CJintLib {
 	public class JsEngine : CObject, IDisposable {
 		public delegate void ArgsDuzenleProc(JsEngine sender, ref Jint.Options args);
 		public delegate void UpdateEngineProc(JsEngine sender, Jint.Engine engine);
 
+		public static readonly object syncRoot = new object();
 		protected Jint.Engine engine;
 		protected Jint.Options args;
 		protected CThreadInfo ti_eventLoop;
@@ -49,6 +54,7 @@ namespace CJintLib {
 				args = value;
 		}
 		public JsConsole Con { get; set; }
+		public JsTools Tools { get; set; }
 		public JsApp App { get; set; }
 		public static JSCoreLib CoreLib { get; set; } = new JSCoreLib();
 		public static JSBootCode BootLib { get; set; } = new JSBootCode();
@@ -58,7 +64,7 @@ namespace CJintLib {
 		}
 
 		public static event ArgsDuzenleProc ArgsDuzenleEk;
-		public event UpdateEngineProc PreUpdateEngine, PostUpdateEngine;
+		public static event UpdateEngineProc PreUpdateEngine, PostUpdateEngine;
 
 		#region Builders
 		public static T From<T>(IEnumerable<string> names) where T : JsEngine, new() {
@@ -77,8 +83,8 @@ namespace CJintLib {
 
 		public virtual void Dispose() {
 			stopEventLoop();
-			CoreLib?.Dispose();
-			BootLib?.Dispose();
+			//CoreLib?.Dispose();
+			//BootLib?.Dispose();
 			if (Libs.bosDegilMi()) {
 				foreach (var lib in Libs)
 					lib.Dispose();
@@ -92,14 +98,18 @@ namespace CJintLib {
 
 		#region Engine Init
 		protected virtual JsEngine init() {
-			Engine = new Engine(Args);
-			Con = new JsConsole { Engine = this };
-			App = new JsApp { Engine = this };
-			this.preUpdateEngine()
-				.fillLibs()
-				.preBoot()
-				.afterPostBoot()
-				.postUpdateEngine();
+			lock (syncRoot) {
+				Engine = new Engine(Args);
+				Con = new JsConsole { Engine = this };
+				Tools = new JsTools { Engine = this };
+				App = new JsApp { Engine = this };
+				this.preUpdateEngine()
+					.initGlobals()
+					.fillLibs()
+					.preBoot()
+					.afterPostBoot()
+					.postUpdateEngine();
+			}
 			return this;
 		}
 		protected virtual JsEngine argsDuzenle(ref Jint.Options args) {
@@ -115,6 +125,8 @@ namespace CJintLib {
 				.DebuggerStatementHandling(Jint.Runtime.Debugger.DebuggerStatementHandling.Clr)
 				.InitialStepMode(Jint.Runtime.Debugger.StepMode.Into)
 				.TimeoutInterval(TimeSpan.FromSeconds(60));
+				//.SetTypeConverter(new Func<Engine, ITypeConverter>(eng => new CJsValue2JSonConverter()));
+				// .AddObjectConverter(new IObjectConverter
 			var iop = args.Interop;
 			iop.Enabled = iop.AllowGetType = iop.AllowSystemReflection = true;
 			iop.CacheRecentObjectWrappers = iop.ExposeDetailedResolutionErrors = true;
@@ -128,19 +140,17 @@ namespace CJintLib {
 			//iop.SerializeToJson = new Options.SerializeToJsonDelegate((target, space, indent) => {
 			//	return null;
 			//});
-			iop.AllowedAssemblies.AddRange(
-				AppDomain.CurrentDomain
-					.GetAssemblies()
-					.Where(a => !a.IsDynamic)
-					.Distinct()
-			);
+			iop.AllowedAssemblies
+				.AddRange(CGlobals.getAsmList(false));
 
 			//iop.ClrExceptionErrorDecorator = new Options.ClrExceptionErrorDecoratorDelegate(iop)
 
 			var m = args.Modules;
 			m.RegisterRequire = true;
 			args.Host.StringCompilationAllowed = true;
+
 			ArgsDuzenleEk?.Invoke(this, ref args);
+
 			return this;
 		}
 		protected JsEngine preUpdateEngine() =>
@@ -153,6 +163,32 @@ namespace CJintLib {
 		}
 
 		#region Internals
+		protected JsEngine initGlobals() {
+			var eng = Engine;
+			var g = eng.Global;
+			eng
+				.SetValue("g", g).SetValue("global", g)
+				.SetValue("window", g).SetValue("self", g)
+				.SetValue("callback", new Action<object>(JsCallback.callback))
+				.SetValue("app", App)
+				.SetValue("tools", Tools)
+				.SetValue("console", Con)
+				.SetValue("con", Con);
+			//	.SetValue("cimport", new Tools.ImportLibsProc(Tools.cimport));
+
+			{
+				var t = Tools;
+				foreach (var p in t.GetType()
+									.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.FlattenHierarchy)
+									.Where(d => d.IsDefined(typeof(JsToolAttribute), true)))
+					eng.SetValue(p.Name, p.GetValue(t));
+				foreach (var m in t.GetType()
+									.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.FlattenHierarchy)
+									.Where(d => d.IsDefined(typeof(JsToolAttribute), true)))
+					eng.SetValue(m.Name, m.asDelegate(t));
+			}
+			return this;
+		}
 		protected JsEngine fillLibs() {
 			if (!BootLib.fill())
 				throw new Exception("JSEngine Boot code init failed");
@@ -164,18 +200,8 @@ namespace CJintLib {
 			}
 			return this;
 		}
-		protected JsEngine beforePreBoot() {
-			var eng = Engine;
-			var g = eng.Global;
-			eng
-				.SetValue("g", g)
-				.SetValue("global", g)
-				.SetValue("window", g)
-				.SetValue("self", g)
-				.SetValue("app", App)
-				.SetValue("importLibs", new JsApp.ImportLibsProc(App.importLibs));
-			return this;
-		}
+		protected JsEngine beforePreBoot() =>
+			this;
 		protected JsEngine preBoot() {
 			beforePreBoot();
 			evalSync(BootLib.Pre);
@@ -184,8 +210,9 @@ namespace CJintLib {
 		}
 		protected JsEngine afterPreBoot() {
 			var eng = Engine;
-			eng.SetValue("callback", new Action<object>(JsCallback.callback));
-			eng.SetValue("console", Con);
+			eng
+				.SetValue("console", Con)
+				.SetValue("con", Con);
 			return this;
 		}
 		protected JsEngine postBoot() {
@@ -337,6 +364,18 @@ namespace CJintLib {
 			Libs?.Clear();
 			return this;
 		}
+
+		public JsEngine setTools(Type cls) {
+			if (cls == null)
+				return this;
+
+			var v = cls.createInst<JsTools>();
+			v.Engine = this;
+			this.Tools = v;
+			return this;
+		}
+		public JsEngine setTools<T>() where T : JsTools =>
+			setTools(typeof(T));
 
 		public static string fixEvalCode(string s) {
 			/*if (s.bosMu())

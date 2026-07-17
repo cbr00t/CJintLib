@@ -20,6 +20,7 @@ namespace CJintLib {
 	public class JsLib : Cache, IEnumerable<Prepared<Script>> {
 		public const string DelimList = "|";
 		public const string CF_Config = "config.php";
+		public static TimeSpan CacheMaxTS = TimeSpan.FromSeconds(CGlobals.g.ProgramciMi ? 3 : 10);
 
 		static string _origin, _webSrvRoot, _wwwRoot, _jintRoot;
 		static CDict<string, Prepared<Script>> key2ScriptCache;
@@ -65,7 +66,7 @@ namespace CJintLib {
 				if (CacheTS.bosMu())
 					return true;
 
-				if (DateTime.Now.Subtract(CacheTS.Value) < TimeSpan.FromSeconds(10))
+				if (DateTime.Now.Subtract(CacheTS.Value) < CacheMaxTS)
 					return false;
 
 				var ts = head(CF_Config, WWWRoot);
