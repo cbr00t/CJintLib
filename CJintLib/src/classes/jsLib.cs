@@ -232,7 +232,10 @@ namespace CJintLib {
 					return sr.ReadToEnd();
 			}
 			try { return withCache(false); }
-			catch (WebException) { return withCache(true); }
+			catch (WebException) {
+				try { return withCache(true); }
+				catch (WebException ex) { return null; }
+			}
 		}
 		public static HttpWebRequest getWebReq(string n, string rootDir = null, bool head = false, bool cached = false) {
 			rootDir = rootDir ?? WWWRoot;
@@ -270,6 +273,9 @@ namespace CJintLib {
 	public class JSCoreLib : JsLib {
 		public static readonly string[] StaticLibs = new[] {
 			"lib/etc/localization.js",
+			"lib_external/etc/string.js",
+			"lib_external/etc/base64.min.js",
+			"lib_external/etc/md5.min.js",
 			"lib/ortak/utils.js",
 			"classes/ortak/CObject.js",
 			"classes/ortak/basitSiniflar.js",

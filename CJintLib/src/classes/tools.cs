@@ -92,8 +92,7 @@ namespace CJintLib {
 			return lib;
 		}
 
-		[JsTool]
-		public async Task<JsFetchResponse> fetch(string url, JObject args = null) {
+		public JsFetchResponse fetch(string url, JObject args = null) {
 			if (string.IsNullOrWhiteSpace(url))
 				throw new ArgumentException("fetch url boş olamaz", nameof(url));
 
@@ -172,7 +171,6 @@ namespace CJintLib {
 				 * verir. Browser fetch() ise bunları normal Response olarak döndürür.
 				 */
 				resp = ex.Response as HttpWebResponse;
-
 				if (resp == null)
 					throw;
 			}

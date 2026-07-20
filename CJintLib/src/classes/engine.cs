@@ -121,12 +121,13 @@ namespace CJintLib {
 				.CatchClrExceptions(ex => true)
 				.AllowOperatorOverloading(true)
 				.PreferJsPrototypeMethods(true)
-				.DebugMode(false)
+				.DebugMode(true)
 				.DebuggerStatementHandling(Jint.Runtime.Debugger.DebuggerStatementHandling.Clr)
 				.InitialStepMode(Jint.Runtime.Debugger.StepMode.Into)
-				.TimeoutInterval(TimeSpan.FromSeconds(60));
-				//.SetTypeConverter(new Func<Engine, ITypeConverter>(eng => new CJsValue2JSonConverter()));
-				// .AddObjectConverter(new IObjectConverter
+				.TimeoutInterval(TimeSpan.FromSeconds(300));
+
+			//.SetTypeConverter(new Func<Engine, ITypeConverter>(eng => new CJsValue2JSonConverter()));
+			// .AddObjectConverter(new IObjectConverter
 			var iop = args.Interop;
 			iop.Enabled = iop.AllowGetType = iop.AllowSystemReflection = true;
 			iop.CacheRecentObjectWrappers = iop.ExposeDetailedResolutionErrors = true;
