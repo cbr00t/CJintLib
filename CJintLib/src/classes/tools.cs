@@ -74,12 +74,12 @@ namespace CJintLib {
 			v is JToken tkn ? tkn :
 			JToken.FromObject(v);
 
-		[JsTool]
+		/*[JsTool]
 		public JToken asJS(object v) =>
 			v.isNull() ? null :
 			v is ObjectInstance oi ? JToken.FromObject(oi.ToObject()) :
 			v is JToken tkn ? tkn :
-			v is string str ? JToken.Parse(str) : null;
+			v is string str ? JToken.Parse(str) : null;*/
 
 		[JsTool]
 		public JsLib cimport(params string[] names) {
@@ -213,12 +213,17 @@ namespace CJintLib {
 				var bytes = bodyBytes ?? new byte[0];
 				var enc = encoding ?? Encoding.UTF8;
 
-				return enc.GetString(bytes);
+				var res = enc.GetString(bytes);
+				if (res.bosDegilMi() && (int)res[0] == 65279)
+					res = res.Substring(1);
+				if (res.hasUTF8Signature())
+					res = res.Substring(3);
+
+				return res;
 			}
 
 			public object json() {
 				var value = text();
-
 				if (string.IsNullOrWhiteSpace(value))
 					return null;
 
