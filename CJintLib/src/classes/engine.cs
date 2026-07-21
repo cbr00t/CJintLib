@@ -141,8 +141,8 @@ namespace CJintLib {
 			//iop.SerializeToJson = new Options.SerializeToJsonDelegate((target, space, indent) => {
 			//	return null;
 			//});
-			iop.AllowedAssemblies
-				.AddRange(CGlobals.getAsmList(false));
+			/*iop.AllowedAssemblies.AddRange(
+				CGlobals.getAsmList(false));*/
 
 			//iop.ClrExceptionErrorDecorator = new Options.ClrExceptionErrorDecoratorDelegate(iop)
 
