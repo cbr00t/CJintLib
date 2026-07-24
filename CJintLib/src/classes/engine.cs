@@ -107,7 +107,7 @@ namespace CJintLib {
 					.initGlobals()
 					.fillLibs()
 					.preBoot()
-					.afterPostBoot()
+					.postBoot()
 					.postUpdateEngine();
 			}
 			return this;
@@ -216,19 +216,20 @@ namespace CJintLib {
 				.SetValue("con", Con);
 			return this;
 		}
-		protected JsEngine postBoot() {
-			beforePostBoot();
-			evalSync(BootLib.Post);
-			return this;
-		}
 		protected JsEngine beforePostBoot() {
 			var eng = Engine;
 			eng.SetValue("delay", new Func<int, Task>(ms =>
 				Task.Delay(ms)));
+			evalSync(CoreLib);
+			return this;
+		}
+		protected JsEngine postBoot() {
+			beforePostBoot();
+			evalSync(BootLib.Post);
+			afterPostBoot();
 			return this;
 		}
 		protected JsEngine afterPostBoot() {
-			evalSync(CoreLib);
 			evalAsync(Libs);
 			return this;
 		}
